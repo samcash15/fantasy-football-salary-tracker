@@ -156,14 +156,20 @@ Maps a Sleeper `player_id` to a forced value that wins over the computed cost.
       "over_cap": false,
       "players": [
         { "sleeper_id": "6794", "name": "Amon-Ra St. Brown", "position": "WR",
-          "team": "DET", "value": 63, "source": "auction" }
+          "team": "DET", "value": 63, "source": "auction", "slot": null }
       ]
     }
   ]
 }
 ```
 
-`source` ∈ `auction | faab | free_agent | trade | override`. Player display fields
+**Taxi + IR are cap-EXEMPT (house rule, confirmed 2026-07-03).** Sleeper's `roster.players` includes
+taxi-squad and IR players; each player carries `slot: null | "taxi" | "ir"` (from `roster.taxi` /
+`roster.reserve`), and **`spent` sums only `slot === null`**. Exempt players are still listed (shown
+dimmed under a "TAXI / IR · NOT COUNTED" sub-section) so their value is visible but uncounted. This
+split is applied in BOTH the compute job and the live browser layer.
+
+`source` ∈ `auction | faab | free_agent | trade | override | pending`. Player display fields
 (name/position/team) are resolved from Sleeper's `/players/nfl` dump **at compute time** and baked
 into `board.json`, so the frontend needs nothing but this one file. Positions use our set
 `QB/RB/WR/TE/DST/K` (remember DEF→DST). The `cap` is **derived from `draft.settings.budget`**

@@ -35,18 +35,24 @@ export async function fetchLiveRosters(leagueId) {
 }
 
 // Rebuild the board's team rows from LIVE rosters + the known value map.
+// Taxi + IR/reserve are exempt from the cap (read live from the roster), so only slot===null counts.
 export function recomputeTeams(rosters, valueMap, ownerMap, cap) {
   return rosters
     .map((r) => {
+      const taxi = new Set(r.taxi || []);
+      const reserve = new Set(r.reserve || []);
       const players = (r.players || [])
         .map((pk) => {
           const known = valueMap.get(pk);
-          if (known) return known;
-          // A brand-new add we haven't valued yet — shows until the next cron run prices it.
-          return { sleeper_id: pk, name: 'New pickup', position: '?', team: null, value: 0, source: 'pending' };
+          // spread so we don't mutate the shared value-map object when we set the live slot
+          const p = known
+            ? { ...known }
+            : { sleeper_id: pk, name: 'New pickup', position: '?', team: null, value: 0, source: 'pending' };
+          p.slot = taxi.has(pk) ? 'taxi' : reserve.has(pk) ? 'ir' : null;
+          return p;
         })
         .sort((a, b) => b.value - a.value);
-      const spent = players.reduce((s, p) => s + p.value, 0);
+      const spent = players.filter((p) => p.slot === null).reduce((s, p) => s + p.value, 0);
       return {
         owner_name: ownerMap.get(r.roster_id) ?? `roster ${r.roster_id}`,
         roster_id: r.roster_id,
