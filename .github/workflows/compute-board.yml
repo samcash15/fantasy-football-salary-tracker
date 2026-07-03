@@ -1,0 +1,42 @@
+name: Compute cap board
+
+# Regenerates public/board.json from Sleeper on a schedule and commits any change.
+# Committing to the repo is what triggers Netlify to redeploy the static site.
+
+on:
+  schedule:
+    - cron: '0 */3 * * *'   # every 3 hours (UTC). Tighten during the season if you want fresher data.
+  workflow_dispatch: {}      # manual "Run workflow" button
+
+# Allow the job to push the regenerated board back to the repo.
+permissions:
+  contents: write
+
+concurrency:
+  group: compute-board
+  cancel-in-progress: true
+
+jobs:
+  compute:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'   # Node 22 has global fetch; compute uses only built-ins.
+
+      - name: Reconstruct boards from Sleeper
+        run: node scripts/compute-board.mjs
+
+      - name: Commit board changes (if any)
+        run: |
+          git config user.name  "cap-board-bot"
+          git config user.email "cap-board-bot@users.noreply.github.com"
+          git add public/board*.json public/leagues.json
+          if git diff --cached --quiet; then
+            echo "No board changes."
+          else
+            git commit -m "chore: refresh cap board $(date -u +%Y-%m-%dT%H:%MZ)"
+            git push
+          fi
