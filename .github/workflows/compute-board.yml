@@ -1,17 +1,19 @@
 name: Compute and deploy cap board
 
-# Pulls Sleeper, reconstructs board.json, commits any change, then builds the Vite site and
-# deploys it to GitHub Pages. Runs on a schedule, on pushes to main, and on demand.
+# Refreshes player VALUES (running-max from Sleeper draft + transactions) into board.json, then
+# builds + deploys the site — but only when something actually changed, to stay under Pages'
+# deploy limits. Live ROSTER changes (drops/moves) are handled in the browser, which polls
+# Sleeper directly, so this job doesn't need to run often.
 
 on:
   schedule:
-    - cron: '0 */3 * * *'   # every 3 hours (UTC). Tighten during the season if you want fresher data.
+    - cron: '*/30 * * * *'   # every 30 min (UTC) — value freshness only; drops are live in-browser.
   push:
     branches: [main]
   workflow_dispatch: {}
 
 permissions:
-  contents: write   # commit the refreshed board.json back to the repo
+  contents: write   # commit refreshed board.json
   pages: write      # deploy to GitHub Pages
   id-token: write   # Pages deployment uses OIDC
 
@@ -32,32 +34,48 @@ jobs:
         with:
           node-version: '22'
 
+      # Day-stamped cache so the 15MB /players/nfl dump is fetched at most once per day
+      # (Sleeper's own guidance), not on every 30-min run.
+      - id: date
+        run: echo "ymd=$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: .cache
+          key: players-nfl-${{ steps.date.outputs.ymd }}
+
       - name: Reconstruct board from Sleeper
         run: node scripts/compute-board.mjs
 
       - name: Commit board changes (if any)
+        id: commit
         run: |
           git config user.name  "cap-board-bot"
           git config user.email "cap-board-bot@users.noreply.github.com"
           git add public/board*.json public/leagues.json
           if git diff --cached --quiet; then
             echo "No board changes."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             git commit -m "chore: refresh cap board $(date -u +%Y-%m-%dT%H:%MZ)"
             git push
+            echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Install deps
-        run: npm install --no-audit --no-fund
-
+      # Deploy only when the board changed, OR when this is a code push / manual run.
+      # (Skips redeploys on quiet scheduled runs, keeping us under Pages' build limits.)
       - name: Build site
-        run: npm run build
+        if: steps.commit.outputs.changed == 'true' || github.event_name != 'schedule'
+        run: |
+          npm install --no-audit --no-fund
+          npm run build
 
       - name: Upload Pages artifact
+        if: steps.commit.outputs.changed == 'true' || github.event_name != 'schedule'
         uses: actions/upload-pages-artifact@v3
         with:
           path: dist
 
       - name: Deploy to GitHub Pages
         id: deployment
+        if: steps.commit.outputs.changed == 'true' || github.event_name != 'schedule'
         uses: actions/deploy-pages@v4

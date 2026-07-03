@@ -56,6 +56,16 @@ walk Sleeper's draft + weekly transactions to find each player's highest-ever co
 to whoever currently rosters him, and sum per team against the $500 cap. That computed board is
 written to a static `board.json` the frontend just fetches and renders.
 
+**Live layer (added 2026-07-03).** To reflect drops/moves quickly without hammering redeploys, the
+frontend also polls Sleeper's `/rosters` endpoint **directly from the browser** (~every 60s) and
+recomputes each team's totals against the values already in `board.json`. So: **values come from
+the cron job; live roster state comes from the browser.** A drop shows up in ~1–5 min (Sleeper
+caches `/rosters` ~5 min — `s-maxage=300` — which is the real floor; true seconds-live isn't
+possible via their API). A brand-new pickup we haven't valued yet shows as `pending` until the next
+cron run prices it. Because of this, the cron is only about *value* freshness — it runs every 30 min
+and **only redeploys when `board.json` actually changed** (stays under Pages' deploy limits); the
+15MB `/players/nfl` dump is day-cached via `actions/cache`.
+
 **Why this stack:**
 - **GitHub Pages** hosts the static React frontend, deployed by the same Action. Free, and keeps
   everything on one platform — no second service/account (Netlify was dropped 2026-07-03).

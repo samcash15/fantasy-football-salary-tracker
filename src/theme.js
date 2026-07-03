@@ -30,5 +30,6 @@ export const SOURCE_STYLES = {
   free_agent: { label: 'FA', color: '#B0A99F' },
   trade: { label: 'TRD', color: '#9B8AC4' },
   override: { label: 'ADJ', color: '#C97B5E' },
+  pending: { label: 'NEW', color: '#E0B33A' },
   none: { label: '—', color: '#7C8A82' },
 };
