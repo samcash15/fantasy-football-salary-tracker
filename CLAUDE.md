@@ -45,10 +45,10 @@ record. Sleeper *is* the roster.
 ## Architecture (decided 2026-07-02 — static JSON + GitHub Actions; Supabase dropped)
 
 ```
-Sleeper API (read-only)  ->  GitHub Actions cron (compute)  ->  static board.json  ->  Netlify (React board)
-  league, rosters,           pulls Sleeper, reconstructs        published to the         fetches board.json,
-  draft picks (auction),     running-max cost per player,       repo/site; overrides     renders it. No DB
-  transactions (FAAB)        applies overrides.json, sums cap    .json also in repo       client, no API keys
+Sleeper API (read-only)  ->  GitHub Actions (compute + deploy)  ->  static board.json  ->  GitHub Pages (React board)
+  league, rosters,           pulls Sleeper, reconstructs           committed to repo,      fetches board.json,
+  draft picks (auction),     running-max cost per player, applies  built into the Vite     renders it. No DB
+  transactions (FAAB)        overrides.json, then builds+deploys    site + deployed         client, no API keys
 ```
 
 Because value = running-max acquisition cost, the app's real work is a **reconstruction step**:
@@ -57,9 +57,11 @@ to whoever currently rosters him, and sum per team against the $500 cap. That co
 written to a static `board.json` the frontend just fetches and renders.
 
 **Why this stack:**
-- **Netlify** hosts the static React frontend. Free, Git-based deploy, no server.
-- **GitHub Actions (cron)** is the compute: on a schedule it pulls Sleeper, runs the reconstruction,
-  reads `overrides.json`, and writes `board.json`. Free, no hosted service.
+- **GitHub Pages** hosts the static React frontend, deployed by the same Action. Free, and keeps
+  everything on one platform — no second service/account (Netlify was dropped 2026-07-03).
+- **GitHub Actions (cron)** is the compute *and* deploy: on a schedule it pulls Sleeper, runs the
+  reconstruction, reads `overrides.json`, writes `board.json`, then builds the site and publishes
+  it to Pages. Free, no hosted service.
 - **Static JSON in the repo** is the entire "datastore": `board.json` (computed output) +
   `overrides.json` (the only human-authored state — commissioner edits it via GitHub's web UI).
 - **Sleeper API** is the source of truth for rosters *and* base values (auction + FAAB); read-only.
@@ -240,8 +242,9 @@ Value = **running-max acquisition cost, charged to the current owner.** To compu
    `overrides.json` -> write `board.json`.
 4. React frontend (Vite): `fetch` `board.json`, render the **league board** — teams, each player +
    value, team totals, cap gauge, over-cap flags. Reuse the prototype's visual language (below).
-5. Deploy frontend to Netlify (Git-based); wire the Action to publish `board.json` where the site
-   can fetch it.
+5. Deploy via **GitHub Pages** — the same Action builds the Vite site and publishes to Pages
+   (repo Settings → Pages → Source: GitHub Actions, one-time). Site: `/<repo>/` subpath, so
+   Vite `base` is set for the production build.
 6. Seed `overrides.json` (empty to start) and document the commissioner's GitHub-web-edit flow.
 
 ## Reference: existing prototype
@@ -263,6 +266,7 @@ backed by artifact key/value storage. That interaction model is now cut. What ca
 - Keep it simple and cheap. Everything should stay on free tiers.
 - No login / no auth unless explicitly requested.
 - Java only where it earns its place (the compute job). Frontend is plain React (no DB client).
-- Hosting: **Netlify (static site) + GitHub Actions (compute) + static JSON.** Supabase was
+- Hosting: **GitHub Pages (static site) + GitHub Actions (compute + deploy) + static JSON** — all
+  on GitHub, no second service (Netlify dropped 2026-07-03). Supabase was
   dropped on 2026-07-02 once the app became read-only — don't reintroduce a database unless we
   specifically need commissioner writes without a Git commit.

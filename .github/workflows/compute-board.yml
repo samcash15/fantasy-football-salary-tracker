@@ -1,32 +1,38 @@
-name: Compute cap board
+name: Compute and deploy cap board
 
-# Regenerates public/board.json from Sleeper on a schedule and commits any change.
-# Committing to the repo is what triggers Netlify to redeploy the static site.
+# Pulls Sleeper, reconstructs board.json, commits any change, then builds the Vite site and
+# deploys it to GitHub Pages. Runs on a schedule, on pushes to main, and on demand.
 
 on:
   schedule:
     - cron: '0 */3 * * *'   # every 3 hours (UTC). Tighten during the season if you want fresher data.
-  workflow_dispatch: {}      # manual "Run workflow" button
+  push:
+    branches: [main]
+  workflow_dispatch: {}
 
-# Allow the job to push the regenerated board back to the repo.
 permissions:
-  contents: write
+  contents: write   # commit the refreshed board.json back to the repo
+  pages: write      # deploy to GitHub Pages
+  id-token: write   # Pages deployment uses OIDC
 
 concurrency:
-  group: compute-board
+  group: pages
   cancel-in-progress: true
 
 jobs:
-  compute:
+  build-deploy:
     runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'   # Node 22 has global fetch; compute uses only built-ins.
+          node-version: '22'
 
-      - name: Reconstruct boards from Sleeper
+      - name: Reconstruct board from Sleeper
         run: node scripts/compute-board.mjs
 
       - name: Commit board changes (if any)
@@ -40,3 +46,18 @@ jobs:
             git commit -m "chore: refresh cap board $(date -u +%Y-%m-%dT%H:%MZ)"
             git push
           fi
+
+      - name: Install deps
+        run: npm install --no-audit --no-fund
+
+      - name: Build site
+        run: npm run build
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
