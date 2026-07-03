@@ -1,7 +1,7 @@
 {
   "league_id": "1378471426956197888",
   "league_name": "FUTURE (QA)",
-  "generated_at": "2026-07-03T18:06:40.649Z",
+  "generated_at": "2026-07-03T18:19:17.790Z",
   "cap": 500,
   "season": "2026",
   "teams": [
@@ -2123,8 +2123,8 @@
     {
       "owner_name": "J0nTan",
       "roster_id": 1,
-      "spent": 364,
-      "remaining": 136,
+      "spent": 333,
+      "remaining": 167,
       "over_cap": false,
       "players": [
         {
@@ -2149,14 +2149,6 @@
           "position": "WR",
           "team": "PHI",
           "value": 34,
-          "source": "auction"
-        },
-        {
-          "sleeper_id": "6904",
-          "name": "Jalen Hurts",
-          "position": "QB",
-          "team": "PHI",
-          "value": 31,
           "source": "auction"
         },
         {
