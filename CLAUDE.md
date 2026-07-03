@@ -62,9 +62,16 @@ recomputes each team's totals against the values already in `board.json`. So: **
 the cron job; live roster state comes from the browser.** A drop shows up in ~1–5 min (Sleeper
 caches `/rosters` ~5 min — `s-maxage=300` — which is the real floor; true seconds-live isn't
 possible via their API). A brand-new pickup we haven't valued yet shows as `pending` until the next
-cron run prices it. Because of this, the cron is only about *value* freshness — it runs every 30 min
-and **only redeploys when `board.json` actually changed** (stays under Pages' deploy limits); the
-15MB `/players/nfl` dump is day-cached via `actions/cache`.
+cron run prices it (the browser also re-fetches `board.json` every ~5 min, so open tabs pick up new
+values without a reload). Because of this, the cron is only about *value* freshness.
+
+**Value-refresh schedule (2026-07-03).** Values only change when **waivers process** — this league
+runs waivers ~**9am Central, Wed–Mon (no Tuesday)**; a claim placed after 9am doesn't process until
+the next 9am. So the cron targets that window instead of running constantly: two attempts (:15/:45)
+at both Central UTC offsets to survive DST + scheduler lag (`15,45 14 * * 0,1,3-6` and
+`15,45 15 * * 0,1,3-6`), **redeploying only when `board.json` actually changed** (stays under Pages'
+deploy limits); the 15MB `/players/nfl` dump is day-cached via `actions/cache`. Everything else
+(drops, trades, FA adds) is roster-state only and shows live in-browser without a cron run.
 
 **Why this stack:**
 - **GitHub Pages** hosts the static React frontend, deployed by the same Action. Free, and keeps

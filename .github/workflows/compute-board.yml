@@ -7,7 +7,12 @@ name: Compute and deploy cap board
 
 on:
   schedule:
-    - cron: '*/30 * * * *'   # every 30 min (UTC) — value freshness only; drops are live in-browser.
+    # Values only change when waivers process (~9am Central, Wed-Mon, no Tuesday). GitHub cron is
+    # UTC with no DST, so we cover both Central offsets and take two attempts (:15 and :45) in case
+    # the scheduler lags. One pair always lands ~9:15/9:45am Central; the other runs an hour off and
+    # harmlessly finds no change. DOW 0,1,3-6 = Sun,Mon,Wed,Thu,Fri,Sat (skips Tue).
+    - cron: '15,45 14 * * 0,1,3-6'   # 9:15/9:45 CDT (summer)  | 8:15/8:45 CST (winter)
+    - cron: '15,45 15 * * 0,1,3-6'   # 10:15/10:45 CDT (summer) | 9:15/9:45 CST (winter)
   push:
     branches: [main]
   workflow_dispatch: {}

@@ -3,53 +3,65 @@ import { COLORS } from './theme.js';
 import TeamCard from './components/TeamCard.jsx';
 import { buildValueMap, buildOwnerMap, fetchLiveRosters, recomputeTeams } from './live.js';
 
-const LIVE_POLL_MS = 60_000; // re-check Sleeper rosters every 60s (Sleeper caches ~5 min anyway)
+const LIVE_POLL_MS = 60_000;    // re-check Sleeper rosters every 60s (live drops/moves)
+const BOARD_POLL_MS = 300_000;  // re-fetch board.json every 5 min (picks up cron value updates)
 
 export default function App() {
-  const [board, setBoard] = useState(null);      // baseline from cron: cap/season/name + value map
-  const [teams, setTeams] = useState([]);         // live-recomputed team rows
-  const [error, setError] = useState(null);       // fatal (couldn't load baseline)
-  const [liveAt, setLiveAt] = useState(null);     // timestamp of last successful live refresh
-  const [liveError, setLiveError] = useState(false); // last live poll failed (non-fatal)
-  const [, setTick] = useState(0);                // drives the "updated Xs ago" label
-  const maps = useRef(null);
+  const boardRef = useRef(null);  // latest board.json
+  const mapsRef = useRef(null);   // { value, owner } lookup maps
+  const [meta, setMeta] = useState(null);   // cap/season/name/generated_at for header + footer
+  const [teams, setTeams] = useState([]);   // live-recomputed rows
+  const [error, setError] = useState(null); // fatal (couldn't load baseline)
+  const [liveAt, setLiveAt] = useState(null);
+  const [liveError, setLiveError] = useState(false);
+  const [, setTick] = useState(0);          // drives the "updated Xs ago" label
 
-  // 1) Load the baseline board once (values, names, cap). Render its snapshot immediately.
   useEffect(() => {
-    fetch(`${import.meta.env.BASE_URL}board.json`, { cache: 'no-store' })
-      .then((r) => { if (!r.ok) throw new Error(`board.json ${r.status}`); return r.json(); })
-      .then((b) => {
-        setBoard(b);
-        setTeams(b.teams);
-        maps.current = { value: buildValueMap(b), owner: buildOwnerMap(b) };
-      })
-      .catch((e) => setError(e.message));
-  }, []);
-
-  // 2) Once we have the baseline, poll Sleeper rosters live and recompute totals.
-  useEffect(() => {
-    if (!board) return;
     let cancelled = false;
-    const poll = async () => {
+
+    const applyBoard = (b) => {
+      boardRef.current = b;
+      mapsRef.current = { value: buildValueMap(b), owner: buildOwnerMap(b) };
+      setMeta({ league_id: b.league_id, league_name: b.league_name, season: b.season, cap: b.cap, generated_at: b.generated_at });
+    };
+
+    const loadBoard = async (firstLoad) => {
+      const r = await fetch(`${import.meta.env.BASE_URL}board.json`, { cache: 'no-store' });
+      if (!r.ok) throw new Error(`board.json ${r.status}`);
+      const b = await r.json();
+      if (cancelled) return;
+      applyBoard(b);
+      if (firstLoad) setTeams(b.teams); // show the snapshot instantly before the first live poll
+    };
+
+    const pollRosters = async () => {
+      const b = boardRef.current;
+      if (!b || cancelled) return;
       try {
-        const rosters = await fetchLiveRosters(board.league_id);
+        const rosters = await fetchLiveRosters(b.league_id);
         if (cancelled) return;
-        setTeams(recomputeTeams(rosters, maps.current.value, maps.current.owner, board.cap));
+        setTeams(recomputeTeams(rosters, mapsRef.current.value, mapsRef.current.owner, b.cap));
         setLiveAt(Date.now());
         setLiveError(false);
       } catch {
-        if (!cancelled) setLiveError(true); // keep showing last-good board
+        if (!cancelled) setLiveError(true); // keep last-good board on screen
       }
     };
-    poll();
-    const id = setInterval(poll, LIVE_POLL_MS);
-    return () => { cancelled = true; clearInterval(id); };
-  }, [board]);
 
-  // tick the relative-time label
-  useEffect(() => {
-    const id = setInterval(() => setTick((t) => t + 1), 5000);
-    return () => clearInterval(id);
+    (async () => {
+      try {
+        await loadBoard(true);
+        await pollRosters();
+      } catch (e) {
+        if (!cancelled) setError(e.message);
+      }
+    })();
+
+    const rosterTimer = setInterval(pollRosters, LIVE_POLL_MS);
+    const boardTimer = setInterval(async () => { try { await loadBoard(false); await pollRosters(); } catch { /* keep last-good */ } }, BOARD_POLL_MS);
+    const tickTimer = setInterval(() => setTick((t) => t + 1), 5000);
+
+    return () => { cancelled = true; clearInterval(rosterTimer); clearInterval(boardTimer); clearInterval(tickTimer); };
   }, []);
 
   const sortedTeams = useMemo(() => [...teams].sort((a, b) => b.spent - a.spent), [teams]);
@@ -75,12 +87,12 @@ export default function App() {
           <div>
             <h1 className="display" style={{ fontSize: 40, margin: 0, lineHeight: 1 }}>THE CAP BOARD</h1>
             <div style={{ fontSize: 13, color: COLORS.muted, marginTop: 4 }}>
-              {board ? board.league_name : 'Loading…'}{board?.season ? ` · ${board.season}` : ''}
+              {meta ? meta.league_name : 'Loading…'}{meta?.season ? ` · ${meta.season}` : ''}
             </div>
           </div>
-          {board && (
+          {meta && (
             <div className="num" style={{ textAlign: 'right', fontSize: 12, color: COLORS.faint }}>
-              <div>${board.cap} CAP · {sortedTeams.length} TEAMS · <span style={{ color: overCount ? COLORS.over : COLORS.faint }}>{overCount ? `${overCount} OVER` : 'ALL UNDER'}</span></div>
+              <div>${meta.cap} CAP · {sortedTeams.length} TEAMS · <span style={{ color: overCount ? COLORS.over : COLORS.faint }}>{overCount ? `${overCount} OVER` : 'ALL UNDER'}</span></div>
               <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', alignItems: 'center', marginTop: 3 }}>
                 <span className="livedot" style={{ background: liveError ? COLORS.over : COLORS.green }} />
                 {liveError ? 'RECONNECTING…' : ago ? `LIVE · UPDATED ${ago}` : 'CONNECTING…'}
@@ -96,17 +108,17 @@ export default function App() {
             Couldn’t load the board: {error}
           </div>
         )}
-        {!error && !board && <div style={{ padding: 24, color: COLORS.faint }}>Loading board…</div>}
-        {board && (
+        {!error && !meta && <div style={{ padding: 24, color: COLORS.faint }}>Loading board…</div>}
+        {meta && (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 16, alignItems: 'start' }}>
-            {sortedTeams.map((t) => <TeamCard key={t.roster_id} team={t} cap={board.cap} />)}
+            {sortedTeams.map((t) => <TeamCard key={t.roster_id} team={t} cap={meta.cap} />)}
           </div>
         )}
       </main>
 
-      {board && (
+      {meta && (
         <footer style={{ maxWidth: 1180, margin: '0 auto', padding: '4px 20px 28px', fontSize: 11, color: COLORS.faint, textAlign: 'center' }}>
-          Rosters update live from Sleeper · player values as of {new Date(board.generated_at).toLocaleString()}
+          Rosters update live from Sleeper · player values as of {new Date(meta.generated_at).toLocaleString()}
         </footer>
       )}
     </div>
