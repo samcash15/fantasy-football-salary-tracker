@@ -60,14 +60,22 @@ jobs:
         run: |
           git config user.name  "cap-board-bot"
           git config user.email "cap-board-bot@users.noreply.github.com"
-          git add public/board*.json public/leagues.json
+          git add public/board*.json public/leagues.json public/overrides.json
           if git diff --cached --quiet; then
             echo "No board changes."
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             git commit -m "chore: refresh cap board $(date -u +%Y-%m-%dT%H:%MZ)"
-            git push
             echo "changed=true" >> "$GITHUB_OUTPUT"
+            # Best-effort push. If another run advanced main during this job, rebase (our freshly
+            # computed board wins) and retry. Never fail the job — the site still deploys from the
+            # built artifact regardless of whether this bookkeeping commit lands.
+            for attempt in 1 2 3; do
+              if git push; then break; fi
+              echo "push rejected (remote moved); rebasing and retrying ($attempt)…"
+              git pull --rebase -X ours origin main || true
+            done || true
+            git push >/dev/null 2>&1 || echo "::warning::board commit not pushed (remote busy); deploy proceeds from the built artifact"
           fi
 
       # Deploy only when the board changed, OR when this is a code push / manual run.
