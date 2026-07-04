@@ -1,26 +1,47 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { COLORS } from './theme.js';
 import TeamCard from './components/TeamCard.jsx';
+import CompactRow from './components/CompactRow.jsx';
+import SummaryStrip from './components/SummaryStrip.jsx';
 import CommishPanel from './components/CommishPanel.jsx';
 import { buildValueMap, buildOwnerMap, fetchLiveRosters, recomputeTeams } from './live.js';
 
 const LIVE_POLL_MS = 60_000;    // re-check Sleeper rosters every 60s (live drops/moves)
 const BOARD_POLL_MS = 300_000;  // re-fetch the board every 5 min (picks up cron value updates)
 
+const pinKey = (lid) => `capboard.pin.${lid}`;
+const readPin = (lid) => { try { const v = localStorage.getItem(pinKey(lid)); return v == null ? null : Number(v); } catch { return null; } };
+const writePin = (lid, id) => { try { if (id == null) localStorage.removeItem(pinKey(lid)); else localStorage.setItem(pinKey(lid), String(id)); } catch { /* ignore */ } };
+
+function sortTeams(teams, sortMode, pinnedId) {
+  const cmp = sortMode === 'remaining' ? (a, b) => b.remaining - a.remaining
+    : sortMode === 'owner' ? (a, b) => a.owner_name.localeCompare(b.owner_name)
+      : (a, b) => b.spent - a.spent;
+  return [...teams].sort((a, b) => {
+    const ap = a.roster_id === pinnedId, bp = b.roster_id === pinnedId;
+    if (ap !== bp) return ap ? -1 : 1;               // pinned "my team" first
+    if (a.over_cap !== b.over_cap) return a.over_cap ? -1 : 1; // then over-cap teams
+    return cmp(a, b);
+  });
+}
+
 export default function App() {
-  const [leagues, setLeagues] = useState([]);     // index from public/leagues.json
+  const [leagues, setLeagues] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
-  const [meta, setMeta] = useState(null);         // cap/season/name/generated_at for header + footer
-  const [teams, setTeams] = useState([]);         // live-recomputed rows
+  const [meta, setMeta] = useState(null);
+  const [teams, setTeams] = useState([]);
   const [error, setError] = useState(null);
   const [liveAt, setLiveAt] = useState(null);
   const [liveError, setLiveError] = useState(false);
   const [overrides, setOverrides] = useState({ overrides: [] });
+  const [view, setView] = useState('compact');   // 'compact' | 'detailed'
+  const [sortMode, setSortMode] = useState('spent');
+  const [pinnedId, setPinnedId] = useState(null);
   const [, setTick] = useState(0);
   const boardRef = useRef(null);
   const mapsRef = useRef(null);
 
-  // 1) Load the league index once; pick the initial league (URL ?league=, else default, else first).
+  // league index → initial selection
   useEffect(() => {
     fetch(`${import.meta.env.BASE_URL}leagues.json`, { cache: 'no-store' })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`leagues.json ${r.status}`))))
@@ -35,7 +56,7 @@ export default function App() {
       .catch((e) => setError(e.message));
   }, []);
 
-  // 2) When the selected league changes, load that board and (re)start the live polling.
+  // load selected board + live polling
   useEffect(() => {
     if (!selectedId) return;
     let cancelled = false;
@@ -46,6 +67,7 @@ export default function App() {
       boardRef.current = b;
       mapsRef.current = { value: buildValueMap(b), owner: buildOwnerMap(b) };
       setMeta({ league_id: b.league_id, league_name: b.league_name, season: b.season, cap: b.cap, generated_at: b.generated_at });
+      setPinnedId(readPin(b.league_id));
     };
     const loadBoard = async (firstLoad) => {
       const r = await fetch(`${import.meta.env.BASE_URL}board.${selectedId}.json`, { cache: 'no-store' });
@@ -68,45 +90,37 @@ export default function App() {
       }
     };
 
-    (async () => {
-      try { await loadBoard(true); await pollRosters(); }
-      catch (e) { if (!cancelled) setError(e.message); }
-    })();
-
+    (async () => { try { await loadBoard(true); await pollRosters(); } catch (e) { if (!cancelled) setError(e.message); } })();
     const rosterTimer = setInterval(pollRosters, LIVE_POLL_MS);
     const boardTimer = setInterval(async () => { try { await loadBoard(false); await pollRosters(); } catch { /* keep last-good */ } }, BOARD_POLL_MS);
     return () => { cancelled = true; clearInterval(rosterTimer); clearInterval(boardTimer); };
   }, [selectedId]);
 
-  // current overrides (for the commissioner panel); best-effort
+  // overrides for the commissioner panel (best-effort)
   useEffect(() => {
     fetch(`${import.meta.env.BASE_URL}overrides.json`, { cache: 'no-store' })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((o) => { if (o) setOverrides(o); })
-      .catch(() => {});
+      .then((r) => (r.ok ? r.json() : null)).then((o) => { if (o) setOverrides(o); }).catch(() => {});
   }, []);
 
-  useEffect(() => {
-    const id = setInterval(() => setTick((t) => t + 1), 5000);
-    return () => clearInterval(id);
-  }, []);
+  useEffect(() => { const id = setInterval(() => setTick((t) => t + 1), 5000); return () => clearInterval(id); }, []);
 
-  // unique rostered players (for the commissioner picker)
+  const selectLeague = (id) => {
+    setSelectedId(id);
+    const u = new URL(window.location.href); u.searchParams.set('league', id); window.history.replaceState({}, '', u);
+  };
+  const togglePin = (rid) => {
+    const next = pinnedId === rid ? null : rid;
+    setPinnedId(next);
+    if (meta) writePin(meta.league_id, next);
+  };
+
+  const sortedTeams = useMemo(() => sortTeams(teams, sortMode, pinnedId), [teams, sortMode, pinnedId]);
+  const overCount = sortedTeams.filter((t) => t.over_cap).length;
   const rosteredPlayers = useMemo(() => {
     const seen = new Map();
     for (const t of teams) for (const p of t.players) if (!seen.has(p.sleeper_id)) seen.set(p.sleeper_id, p);
     return [...seen.values()].sort((a, b) => b.value - a.value);
   }, [teams]);
-
-  const selectLeague = (id) => {
-    setSelectedId(id);
-    const u = new URL(window.location.href);
-    u.searchParams.set('league', id);
-    window.history.replaceState({}, '', u);
-  };
-
-  const sortedTeams = useMemo(() => [...teams].sort((a, b) => b.spent - a.spent), [teams]);
-  const overCount = sortedTeams.filter((t) => t.over_cap).length;
   const ago = liveAt ? relative(Date.now() - liveAt) : null;
 
   return (
@@ -121,10 +135,14 @@ export default function App() {
           rgba(242,239,233,0.035) 0px, rgba(242,239,233,0.035) 1px, transparent 1px, transparent 64px); }
         @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
         .livedot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; animation: pulse 1.8s ease-in-out infinite; }
-        .league-select { font-family: 'IBM Plex Sans', sans-serif; font-size: 13px; color: #F2EFE9;
-          background: rgba(0,0,0,0.3); border: 1px solid rgba(242,239,233,0.2); border-radius: 6px;
-          padding: 4px 8px; margin-top: 6px; cursor: pointer; }
-        .league-select:focus { outline: 2px solid #D4A94E; }
+        .league-select, .sort-select { font-family: 'IBM Plex Sans', sans-serif; font-size: 13px; color: #F2EFE9;
+          background: rgba(0,0,0,0.3); border: 1px solid rgba(242,239,233,0.2); border-radius: 6px; padding: 5px 8px; cursor: pointer; }
+        .league-select:focus, .sort-select:focus { outline: 2px solid #D4A94E; }
+        .seg { display: inline-flex; border: 1px solid rgba(242,239,233,0.2); border-radius: 6px; overflow: hidden; }
+        .seg button { background: none; border: none; color: #B0A99F; font-size: 13px; padding: 5px 12px; cursor: pointer; }
+        .seg button.active { background: rgba(212,169,78,0.15); color: #D4A94E; }
+        .cards-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; align-items: start; }
+        @media (max-width: 480px) { .compact-gauge { display: none; } }
       `}</style>
 
       <header className="field-lines" style={{ borderBottom: `1px solid ${COLORS.panelBorder}`, padding: '22px 20px 18px' }}>
@@ -132,13 +150,11 @@ export default function App() {
           <div>
             <h1 className="display" style={{ fontSize: 40, margin: 0, lineHeight: 1 }}>THE CAP BOARD</h1>
             {leagues.length > 1 ? (
-              <select className="league-select" value={selectedId ?? ''} onChange={(e) => selectLeague(e.target.value)} aria-label="Select league">
+              <select className="league-select" style={{ marginTop: 6 }} value={selectedId ?? ''} onChange={(e) => selectLeague(e.target.value)} aria-label="Select league">
                 {leagues.map((l) => <option key={l.id} value={l.id}>{l.label}</option>)}
               </select>
             ) : (
-              <div style={{ fontSize: 13, color: COLORS.muted, marginTop: 4 }}>
-                {meta ? meta.league_name : 'Loading…'}{meta?.season ? ` · ${meta.season}` : ''}
-              </div>
+              <div style={{ fontSize: 13, color: COLORS.muted, marginTop: 4 }}>{meta ? meta.league_name : 'Loading…'}{meta?.season ? ` · ${meta.season}` : ''}</div>
             )}
           </div>
           {meta && (
@@ -154,16 +170,42 @@ export default function App() {
       </header>
 
       <main style={{ maxWidth: 1180, margin: '0 auto', padding: 20 }}>
-        {error && (
-          <div style={{ padding: 16, border: `1px solid ${COLORS.over}`, borderRadius: 8, color: COLORS.over }}>
-            Couldn’t load the board: {error}
-          </div>
-        )}
+        {error && <div style={{ padding: 16, border: `1px solid ${COLORS.over}`, borderRadius: 8, color: COLORS.over }}>Couldn’t load the board: {error}</div>}
         {!error && !meta && <div style={{ padding: 24, color: COLORS.faint }}>Loading board…</div>}
+
         {meta && (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 16, alignItems: 'start' }}>
-            {sortedTeams.map((t) => <TeamCard key={t.roster_id} team={t} cap={meta.cap} />)}
-          </div>
+          <>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>
+              <div className="seg">
+                <button className={view === 'compact' ? 'active' : ''} onClick={() => setView('compact')}>Compact</button>
+                <button className={view === 'detailed' ? 'active' : ''} onClick={() => setView('detailed')}>Detailed</button>
+              </div>
+              <label style={{ fontSize: 12, color: COLORS.faint, display: 'flex', alignItems: 'center', gap: 6 }}>
+                Sort
+                <select className="sort-select" value={sortMode} onChange={(e) => setSortMode(e.target.value)}>
+                  <option value="spent">Cap used</option>
+                  <option value="remaining">Cap space</option>
+                  <option value="owner">Team name</option>
+                </select>
+              </label>
+            </div>
+
+            <SummaryStrip teams={sortedTeams} />
+
+            {view === 'compact' ? (
+              <div>
+                {sortedTeams.map((t, i) => (
+                  <CompactRow key={t.roster_id} team={t} rank={i + 1} cap={meta.cap} pinned={t.roster_id === pinnedId} onTogglePin={() => togglePin(t.roster_id)} />
+                ))}
+              </div>
+            ) : (
+              <div className="cards-grid">
+                {sortedTeams.map((t) => (
+                  <TeamCard key={t.roster_id} team={t} cap={meta.cap} pinned={t.roster_id === pinnedId} onTogglePin={() => togglePin(t.roster_id)} />
+                ))}
+              </div>
+            )}
+          </>
         )}
       </main>
 

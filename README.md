@@ -30,6 +30,18 @@ human-authored input is a small `overrides.json` for commissioner value correcti
 Values are **reconstructed**, not stored as a static price list: the compute job walks Sleeper's
 draft picks + weekly transactions to find each player's running-max cost.
 
+### Using the board
+
+- **Compact view (default):** one row per team — rank, owner, cap gauge, and color-coded remaining
+  (**green** = has room, **gold** = maxed but legal, **red** = over). Over-cap teams sort to the
+  top. Click any row to expand its roster.
+- **Detailed view:** the same info as full cards in a grid.
+- **Sort** by cap used, cap space, or team name; a **summary strip** shows over-cap count, the team
+  with the most room, and the tightest team.
+- **⭐ Pin your team** to keep it at the top (remembered on your device — no login).
+- In a roster, expensive players lead; the `$1` minimum-bid bench is collapsed behind a "show" link,
+  and taxi/IR players appear dimmed and uncounted.
+
 > **Offseason reset (not yet built):** at year-end, a player still on a roster gets **+15%**; a
 > player on no roster is **cleared** and re-priced at the next auction.
 

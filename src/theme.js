@@ -33,3 +33,13 @@ export const SOURCE_STYLES = {
   pending: { label: 'NEW', color: '#E0B33A' },
   none: { label: '—', color: '#7C8A82' },
 };
+
+// Which acquisition sources are worth a badge — auction is ~everything, so hide it as noise.
+export const NOTABLE_SOURCES = new Set(['faab', 'trade', 'override', 'pending']);
+
+// Color + label for a team's cap status (red = over, green = has room, gold = maxed but legal).
+export function capStatus(remaining, overCap) {
+  if (overCap) return { color: COLORS.over, label: `-$${Math.abs(remaining)} OVER`, over: true };
+  if (remaining >= 20) return { color: COLORS.green, label: `$${remaining} LEFT`, over: false };
+  return { color: COLORS.gold, label: `$${remaining} LEFT`, over: false };
+}
