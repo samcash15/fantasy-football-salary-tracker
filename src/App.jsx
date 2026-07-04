@@ -4,36 +4,55 @@ import TeamCard from './components/TeamCard.jsx';
 import { buildValueMap, buildOwnerMap, fetchLiveRosters, recomputeTeams } from './live.js';
 
 const LIVE_POLL_MS = 60_000;    // re-check Sleeper rosters every 60s (live drops/moves)
-const BOARD_POLL_MS = 300_000;  // re-fetch board.json every 5 min (picks up cron value updates)
+const BOARD_POLL_MS = 300_000;  // re-fetch the board every 5 min (picks up cron value updates)
 
 export default function App() {
-  const boardRef = useRef(null);  // latest board.json
-  const mapsRef = useRef(null);   // { value, owner } lookup maps
-  const [meta, setMeta] = useState(null);   // cap/season/name/generated_at for header + footer
-  const [teams, setTeams] = useState([]);   // live-recomputed rows
-  const [error, setError] = useState(null); // fatal (couldn't load baseline)
+  const [leagues, setLeagues] = useState([]);     // index from public/leagues.json
+  const [selectedId, setSelectedId] = useState(null);
+  const [meta, setMeta] = useState(null);         // cap/season/name/generated_at for header + footer
+  const [teams, setTeams] = useState([]);         // live-recomputed rows
+  const [error, setError] = useState(null);
   const [liveAt, setLiveAt] = useState(null);
   const [liveError, setLiveError] = useState(false);
-  const [, setTick] = useState(0);          // drives the "updated Xs ago" label
+  const [, setTick] = useState(0);
+  const boardRef = useRef(null);
+  const mapsRef = useRef(null);
 
+  // 1) Load the league index once; pick the initial league (URL ?league=, else default, else first).
   useEffect(() => {
+    fetch(`${import.meta.env.BASE_URL}leagues.json`, { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`leagues.json ${r.status}`))))
+      .then((idx) => {
+        const list = idx.leagues || [];
+        setLeagues(list);
+        const param = new URLSearchParams(window.location.search).get('league');
+        const initial = list.find((l) => l.id === param) || list.find((l) => l.default) || list[0];
+        if (initial) setSelectedId(initial.id);
+        else setError('No leagues configured');
+      })
+      .catch((e) => setError(e.message));
+  }, []);
+
+  // 2) When the selected league changes, load that board and (re)start the live polling.
+  useEffect(() => {
+    if (!selectedId) return;
     let cancelled = false;
+    setError(null); setMeta(null); setTeams([]); setLiveAt(null); setLiveError(false);
+    boardRef.current = null; mapsRef.current = null;
 
     const applyBoard = (b) => {
       boardRef.current = b;
       mapsRef.current = { value: buildValueMap(b), owner: buildOwnerMap(b) };
       setMeta({ league_id: b.league_id, league_name: b.league_name, season: b.season, cap: b.cap, generated_at: b.generated_at });
     };
-
     const loadBoard = async (firstLoad) => {
-      const r = await fetch(`${import.meta.env.BASE_URL}board.json`, { cache: 'no-store' });
-      if (!r.ok) throw new Error(`board.json ${r.status}`);
+      const r = await fetch(`${import.meta.env.BASE_URL}board.${selectedId}.json`, { cache: 'no-store' });
+      if (!r.ok) throw new Error(`board ${r.status}`);
       const b = await r.json();
       if (cancelled) return;
       applyBoard(b);
-      if (firstLoad) setTeams(b.teams); // show the snapshot instantly before the first live poll
+      if (firstLoad) setTeams(b.teams);
     };
-
     const pollRosters = async () => {
       const b = boardRef.current;
       if (!b || cancelled) return;
@@ -41,28 +60,33 @@ export default function App() {
         const rosters = await fetchLiveRosters(b.league_id);
         if (cancelled) return;
         setTeams(recomputeTeams(rosters, mapsRef.current.value, mapsRef.current.owner, b.cap));
-        setLiveAt(Date.now());
-        setLiveError(false);
+        setLiveAt(Date.now()); setLiveError(false);
       } catch {
-        if (!cancelled) setLiveError(true); // keep last-good board on screen
+        if (!cancelled) setLiveError(true);
       }
     };
 
     (async () => {
-      try {
-        await loadBoard(true);
-        await pollRosters();
-      } catch (e) {
-        if (!cancelled) setError(e.message);
-      }
+      try { await loadBoard(true); await pollRosters(); }
+      catch (e) { if (!cancelled) setError(e.message); }
     })();
 
     const rosterTimer = setInterval(pollRosters, LIVE_POLL_MS);
     const boardTimer = setInterval(async () => { try { await loadBoard(false); await pollRosters(); } catch { /* keep last-good */ } }, BOARD_POLL_MS);
-    const tickTimer = setInterval(() => setTick((t) => t + 1), 5000);
+    return () => { cancelled = true; clearInterval(rosterTimer); clearInterval(boardTimer); };
+  }, [selectedId]);
 
-    return () => { cancelled = true; clearInterval(rosterTimer); clearInterval(boardTimer); clearInterval(tickTimer); };
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), 5000);
+    return () => clearInterval(id);
   }, []);
+
+  const selectLeague = (id) => {
+    setSelectedId(id);
+    const u = new URL(window.location.href);
+    u.searchParams.set('league', id);
+    window.history.replaceState({}, '', u);
+  };
 
   const sortedTeams = useMemo(() => [...teams].sort((a, b) => b.spent - a.spent), [teams]);
   const overCount = sortedTeams.filter((t) => t.over_cap).length;
@@ -80,15 +104,25 @@ export default function App() {
           rgba(242,239,233,0.035) 0px, rgba(242,239,233,0.035) 1px, transparent 1px, transparent 64px); }
         @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
         .livedot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; animation: pulse 1.8s ease-in-out infinite; }
+        .league-select { font-family: 'IBM Plex Sans', sans-serif; font-size: 13px; color: #F2EFE9;
+          background: rgba(0,0,0,0.3); border: 1px solid rgba(242,239,233,0.2); border-radius: 6px;
+          padding: 4px 8px; margin-top: 6px; cursor: pointer; }
+        .league-select:focus { outline: 2px solid #D4A94E; }
       `}</style>
 
       <header className="field-lines" style={{ borderBottom: `1px solid ${COLORS.panelBorder}`, padding: '22px 20px 18px' }}>
         <div style={{ maxWidth: 1180, margin: '0 auto', display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
           <div>
             <h1 className="display" style={{ fontSize: 40, margin: 0, lineHeight: 1 }}>THE CAP BOARD</h1>
-            <div style={{ fontSize: 13, color: COLORS.muted, marginTop: 4 }}>
-              {meta ? meta.league_name : 'Loading…'}{meta?.season ? ` · ${meta.season}` : ''}
-            </div>
+            {leagues.length > 1 ? (
+              <select className="league-select" value={selectedId ?? ''} onChange={(e) => selectLeague(e.target.value)} aria-label="Select league">
+                {leagues.map((l) => <option key={l.id} value={l.id}>{l.label}</option>)}
+              </select>
+            ) : (
+              <div style={{ fontSize: 13, color: COLORS.muted, marginTop: 4 }}>
+                {meta ? meta.league_name : 'Loading…'}{meta?.season ? ` · ${meta.season}` : ''}
+              </div>
+            )}
           </div>
           {meta && (
             <div className="num" style={{ textAlign: 'right', fontSize: 12, color: COLORS.faint }}>
