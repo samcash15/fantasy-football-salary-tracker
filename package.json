@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "compute": "node scripts/compute-board.mjs"
+    "compute": "node scripts/compute-board.mjs",
+    "test": "node --test scripts/reconstruct.test.mjs"
   },
   "dependencies": {
     "react": "^18.3.1",

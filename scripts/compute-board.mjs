@@ -8,6 +8,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
+import { fileURLToPath } from 'node:url';
 
 const BASE = 'https://api.sleeper.app/v1';
 const ROOT = process.cwd();
@@ -53,33 +54,45 @@ async function resolveLeague(leagueId) {
   return { league, draft, cap, isFaab, season: league.season, teams: draft.settings?.teams ?? league.total_rosters };
 }
 
-// --- reconstruct running-max cost + build the board for one league. ---
+// --- PURE running-max reconstruction (exported for tests). Given auction picks and each week's
+// transactions, returns value + source per player: seeded from the auction, raised (never lowered)
+// by FAAB waiver bids. Free-agent/trade adds and non-'complete' txns contribute no new cost. ---
+export function reconstructValues(picks, weeklyTransactions) {
+  const val = new Map(), src = new Map();
+  const bump = (pk, amt, source) => { if (!val.has(pk) || amt > val.get(pk)) { val.set(pk, amt); src.set(pk, source); } };
+
+  for (const p of picks || []) bump(p.player_id, parseInt(p.metadata?.amount, 10) || 0, 'auction');
+
+  let waiverRaises = 0;
+  for (const txs of weeklyTransactions || []) {
+    for (const t of txs || []) {
+      if (t.status !== 'complete') continue;
+      if (t.type === 'waiver' && t.settings?.waiver_bid != null && t.adds) {
+        const bid = parseInt(t.settings.waiver_bid, 10) || 0;
+        for (const pk of Object.keys(t.adds)) {
+          const before = val.get(pk) ?? -1;
+          bump(pk, bid, 'faab');
+          if (bid > before) waiverRaises++;
+        }
+      }
+    }
+  }
+  return { val, src, waiverRaises };
+}
+
+// --- build the board for one league (fetches Sleeper, reconstructs, applies overrides). ---
 async function computeBoard(cfg, players, overridesById) {
   const { league, draft, cap, season } = await resolveLeague(cfg.id);
   const users = Object.fromEntries((await get(`${BASE}/league/${cfg.id}/users`)).map((u) => [u.user_id, u.display_name]));
   const rosters = await get(`${BASE}/league/${cfg.id}/rosters`);
 
-  const val = new Map(), src = new Map();
-  const bump = (pk, amt, source) => { if (!val.has(pk) || amt > val.get(pk)) { val.set(pk, amt); src.set(pk, source); } };
-
-  // seed from the auction draft
-  for (const p of await get(`${BASE}/draft/${draft.draft_id}/picks`)) {
-    bump(p.player_id, parseInt(p.metadata.amount, 10) || 0, 'auction');
-  }
-
-  // replay transactions: waiver FAAB bids raise the running max (never lower)
-  let waiverRaises = 0;
+  // fetch auction picks + every week's transactions, then reconstruct running-max values
+  const picks = await get(`${BASE}/draft/${draft.draft_id}/picks`);
+  const weekly = [];
   for (let w = 0; w <= 18; w++) {
-    let txs;
-    try { txs = await get(`${BASE}/league/${cfg.id}/transactions/${w}`); } catch { continue; }
-    for (const t of txs) {
-      if (t.status !== 'complete') continue;
-      if (t.type === 'waiver' && t.settings?.waiver_bid != null && t.adds) {
-        const bid = parseInt(t.settings.waiver_bid, 10) || 0;
-        for (const pk of Object.keys(t.adds)) { const before = val.get(pk) ?? -1; bump(pk, bid, 'faab'); if (bid > before) waiverRaises++; }
-      }
-    }
+    try { weekly.push(await get(`${BASE}/league/${cfg.id}/transactions/${w}`)); } catch { /* week may not exist */ }
   }
+  const { val, src, waiverRaises } = reconstructValues(picks, weekly);
 
   const displayName = (pk) => {
     const pl = players[pk];
@@ -110,34 +123,40 @@ async function computeBoard(cfg, players, overridesById) {
   };
 }
 
-// --- main ---
-const cfg = readJson(path.join(ROOT, 'leagues.json'), { leagues: [] });
-const overrides = readJson(path.join(ROOT, 'overrides.json'), { overrides: [] });
-const overridesById = Object.fromEntries((overrides.overrides || []).map((o) => [String(o.sleeper_id), o]));
-if (!cfg.leagues?.length) { console.error('leagues.json has no leagues'); process.exit(1); }
+// --- main (runs only when executed directly, so importing for tests is side-effect free) ---
+async function main() {
+  const cfg = readJson(path.join(ROOT, 'leagues.json'), { leagues: [] });
+  const overrides = readJson(path.join(ROOT, 'overrides.json'), { overrides: [] });
+  const overridesById = Object.fromEntries((overrides.overrides || []).map((o) => [String(o.sleeper_id), o]));
+  if (!cfg.leagues?.length) { console.error('leagues.json has no leagues'); process.exit(1); }
 
-fs.mkdirSync(PUBLIC, { recursive: true });
-const players = await loadPlayers();
+  fs.mkdirSync(PUBLIC, { recursive: true });
+  const players = await loadPlayers();
 
-let failures = 0;
-const index = [];
-for (const league of cfg.leagues) {
-  try {
-    console.log(`\n▶ ${league.label ?? league.id} (${league.id})`);
-    const { board, stats } = await computeBoard(league, players, overridesById);
-    fs.writeFileSync(path.join(PUBLIC, `board.${league.id}.json`), JSON.stringify(board, null, 2));
-    if (league.default) fs.writeFileSync(path.join(PUBLIC, 'board.json'), JSON.stringify(board, null, 2));
-    index.push({ id: league.id, label: league.label ?? board.league_name, default: !!league.default });
-    console.log(`  ✓ ${board.league_name}: ${stats.teams} teams, $${stats.committed} committed, ${stats.over} over cap, ${stats.priced} priced players, ${stats.waiverRaises} waiver raises`);
-  } catch (e) {
-    failures++;
-    console.error(`  ✗ ${league.id}: ${e.message}`);
+  let failures = 0;
+  const index = [];
+  for (const league of cfg.leagues) {
+    try {
+      console.log(`\n▶ ${league.label ?? league.id} (${league.id})`);
+      const { board, stats } = await computeBoard(league, players, overridesById);
+      fs.writeFileSync(path.join(PUBLIC, `board.${league.id}.json`), JSON.stringify(board, null, 2));
+      if (league.default) fs.writeFileSync(path.join(PUBLIC, 'board.json'), JSON.stringify(board, null, 2));
+      index.push({ id: league.id, label: league.label ?? board.league_name, default: !!league.default });
+      console.log(`  ✓ ${board.league_name}: ${stats.teams} teams, $${stats.committed} committed, ${stats.over} over cap, ${stats.priced} priced players, ${stats.waiverRaises} waiver raises`);
+    } catch (e) {
+      failures++;
+      console.error(`  ✗ ${league.id}: ${e.message}`);
+    }
   }
-}
-// small index so the UI can discover boards
-fs.writeFileSync(path.join(PUBLIC, 'leagues.json'), JSON.stringify({ leagues: index }, null, 2));
-// publish current overrides so the commissioner panel can show/edit them
-fs.writeFileSync(path.join(PUBLIC, 'overrides.json'), JSON.stringify(overrides, null, 2));
+  // small index so the UI can discover boards
+  fs.writeFileSync(path.join(PUBLIC, 'leagues.json'), JSON.stringify({ leagues: index }, null, 2));
+  // publish current overrides so the commissioner panel can show/edit them
+  fs.writeFileSync(path.join(PUBLIC, 'overrides.json'), JSON.stringify(overrides, null, 2));
 
-console.log(`\nDone. ${index.length} board(s) written, ${failures} failure(s).`);
-process.exit(failures ? 1 : 0);
+  console.log(`\nDone. ${index.length} board(s) written, ${failures} failure(s).`);
+  process.exit(failures ? 1 : 0);
+}
+
+if (process.argv[1] && process.argv[1] === fileURLToPath(import.meta.url)) {
+  main();
+}

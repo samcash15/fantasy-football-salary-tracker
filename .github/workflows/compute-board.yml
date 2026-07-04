@@ -39,6 +39,10 @@ jobs:
         with:
           node-version: '22'
 
+      # Unit-test the reconstruction engine before computing/deploying (no deps needed).
+      - name: Test reconstruction
+        run: npm test
+
       # Day-stamped cache so the 15MB /players/nfl dump is fetched at most once per day
       # (Sleeper's own guidance), not on every 30-min run.
       - id: date
