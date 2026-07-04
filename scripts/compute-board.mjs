@@ -134,8 +134,10 @@ for (const league of cfg.leagues) {
     console.error(`  ✗ ${league.id}: ${e.message}`);
   }
 }
-// small index so a future multi-league UI can discover boards
+// small index so the UI can discover boards
 fs.writeFileSync(path.join(PUBLIC, 'leagues.json'), JSON.stringify({ leagues: index }, null, 2));
+// publish current overrides so the commissioner panel can show/edit them
+fs.writeFileSync(path.join(PUBLIC, 'overrides.json'), JSON.stringify(overrides, null, 2));
 
 console.log(`\nDone. ${index.length} board(s) written, ${failures} failure(s).`);
 process.exit(failures ? 1 : 0);

@@ -1,0 +1,4 @@
+{
+  "_comment": "Commissioner value corrections. An entry here WINS over the computed running-max value. Keyed by Sleeper player_id. Edit via GitHub's web UI; the next compute run picks it up.",
+  "overrides": []
+}

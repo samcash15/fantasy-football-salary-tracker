@@ -115,8 +115,18 @@ throwaway script on 2026-07-02):
 - **Output per league:** one `board.<league_id>.json`. Config can hold a list of leagues; the
   compute job loops them. Frontend selects a league (default = the configured one).
 
-Config lives in a tiny file (e.g. `leagues.json`: `[{ "id": "...", "label": "..." }]`) — no code
-change to add any league that fits the criteria.
+Config lives in a tiny file (`leagues.json`: `{ "leagues": [{ "id": "...", "label": "...", "default": true }] }`)
+— no code change to add any league that fits the criteria. The compute job writes one
+`board.<league_id>.json` per league plus a `public/leagues.json` index; the frontend shows a
+**league dropdown** when >1 league is configured and remembers the choice via a `?league=<id>`
+URL param (shareable).
+
+**Commissioner panel (built 2026-07-03).** Since the static site can't write to the repo, the
+in-app "Commissioner tools" panel is a **helper**: it lists rostered players with current values,
+lets you author overrides (pick player → amount → note), and generates the exact `overrides.json`
+with a **Copy** button + a one-click **edit-on-GitHub** deep link. You paste + commit; the next
+compute run applies it. No backend, no auth, no secret (honor-system, per constraints). The compute
+job publishes current overrides to `public/overrides.json` so the panel can preload them.
 
 ## (Removed) Supabase free-tier pause
 

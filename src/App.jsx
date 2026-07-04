@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { COLORS } from './theme.js';
 import TeamCard from './components/TeamCard.jsx';
+import CommishPanel from './components/CommishPanel.jsx';
 import { buildValueMap, buildOwnerMap, fetchLiveRosters, recomputeTeams } from './live.js';
 
 const LIVE_POLL_MS = 60_000;    // re-check Sleeper rosters every 60s (live drops/moves)
@@ -14,6 +15,7 @@ export default function App() {
   const [error, setError] = useState(null);
   const [liveAt, setLiveAt] = useState(null);
   const [liveError, setLiveError] = useState(false);
+  const [overrides, setOverrides] = useState({ overrides: [] });
   const [, setTick] = useState(0);
   const boardRef = useRef(null);
   const mapsRef = useRef(null);
@@ -76,10 +78,25 @@ export default function App() {
     return () => { cancelled = true; clearInterval(rosterTimer); clearInterval(boardTimer); };
   }, [selectedId]);
 
+  // current overrides (for the commissioner panel); best-effort
+  useEffect(() => {
+    fetch(`${import.meta.env.BASE_URL}overrides.json`, { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((o) => { if (o) setOverrides(o); })
+      .catch(() => {});
+  }, []);
+
   useEffect(() => {
     const id = setInterval(() => setTick((t) => t + 1), 5000);
     return () => clearInterval(id);
   }, []);
+
+  // unique rostered players (for the commissioner picker)
+  const rosteredPlayers = useMemo(() => {
+    const seen = new Map();
+    for (const t of teams) for (const p of t.players) if (!seen.has(p.sleeper_id)) seen.set(p.sleeper_id, p);
+    return [...seen.values()].sort((a, b) => b.value - a.value);
+  }, [teams]);
 
   const selectLeague = (id) => {
     setSelectedId(id);
@@ -149,6 +166,8 @@ export default function App() {
           </div>
         )}
       </main>
+
+      {meta && <CommishPanel players={rosteredPlayers} overrides={overrides} />}
 
       {meta && (
         <footer style={{ maxWidth: 1180, margin: '0 auto', padding: '4px 20px 28px', fontSize: 11, color: COLORS.faint, textAlign: 'center' }}>
