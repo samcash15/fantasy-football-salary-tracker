@@ -41,6 +41,10 @@ draft picks + weekly transactions to find each player's running-max cost.
 - **⭐ Pin your team** to keep it at the top (remembered on your device — no login).
 - In a roster, expensive players lead; the `$1` minimum-bid bench is collapsed behind a "show" link,
   and taxi/IR players appear dimmed and uncounted.
+- **＋ Add a league by ID:** paste any Sleeper **auction** league ID and its board is computed
+  live in your browser (no server involved), then saved to your device so it joins your dropdown.
+  These ad-hoc leagues have no commissioner overrides and do a bit more loading on first view (they
+  pull the league's data + Sleeper's player list). Non-auction leagues are rejected with a message.
 
 > **Offseason reset (not yet built):** at year-end, a player still on a roster gets **+15%**; a
 > player on no roster is **cleared** and re-priced at the next auction.

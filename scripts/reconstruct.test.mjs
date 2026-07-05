@@ -3,7 +3,7 @@
 // it's the offseason, so no real waiver bids exist yet). Run: `npm test`.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { reconstructValues } from './compute-board.mjs';
+import { reconstructValues } from '../src/engine.js';
 
 // helpers to build synthetic Sleeper-shaped data
 const pick = (id, amount) => ({ player_id: id, metadata: { amount: String(amount) } });

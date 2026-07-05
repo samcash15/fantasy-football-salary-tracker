@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
+import { reconstructValues, buildTeams } from '../src/engine.js';
 
 const BASE = 'https://api.sleeper.app/v1';
 const ROOT = process.cwd();
@@ -54,32 +55,6 @@ async function resolveLeague(leagueId) {
   return { league, draft, cap, isFaab, season: league.season, teams: draft.settings?.teams ?? league.total_rosters };
 }
 
-// --- PURE running-max reconstruction (exported for tests). Given auction picks and each week's
-// transactions, returns value + source per player: seeded from the auction, raised (never lowered)
-// by FAAB waiver bids. Free-agent/trade adds and non-'complete' txns contribute no new cost. ---
-export function reconstructValues(picks, weeklyTransactions) {
-  const val = new Map(), src = new Map();
-  const bump = (pk, amt, source) => { if (!val.has(pk) || amt > val.get(pk)) { val.set(pk, amt); src.set(pk, source); } };
-
-  for (const p of picks || []) bump(p.player_id, parseInt(p.metadata?.amount, 10) || 0, 'auction');
-
-  let waiverRaises = 0;
-  for (const txs of weeklyTransactions || []) {
-    for (const t of txs || []) {
-      if (t.status !== 'complete') continue;
-      if (t.type === 'waiver' && t.settings?.waiver_bid != null && t.adds) {
-        const bid = parseInt(t.settings.waiver_bid, 10) || 0;
-        for (const pk of Object.keys(t.adds)) {
-          const before = val.get(pk) ?? -1;
-          bump(pk, bid, 'faab');
-          if (bid > before) waiverRaises++;
-        }
-      }
-    }
-  }
-  return { val, src, waiverRaises };
-}
-
 // --- build the board for one league (fetches Sleeper, reconstructs, applies overrides). ---
 async function computeBoard(cfg, players, overridesById) {
   const { league, draft, cap, season } = await resolveLeague(cfg.id);
@@ -101,21 +76,10 @@ async function computeBoard(cfg, players, overridesById) {
   };
   const displayPos = (pk) => { const p = players[pk]?.position; return p === 'DEF' ? 'DST' : (p ?? '?'); }; // DEF -> DST
 
-  const teams = rosters.map((r) => {
-    // Taxi squad + IR/reserve are EXEMPT from the cap (house rule). They're subsets of `players`;
-    // mark each player's slot and sum only the counted (slot === null) ones.
-    const taxi = new Set(r.taxi || []);
-    const reserve = new Set(r.reserve || []);
-    const slotOf = (pk) => (taxi.has(pk) ? 'taxi' : reserve.has(pk) ? 'ir' : null);
-    const list = (r.players || []).map((pk) => {
-      const ov = overridesById[pk];
-      const value = ov ? ov.amount : (val.get(pk) ?? 0);
-      const source = ov ? 'override' : (src.get(pk) ?? 'none');
-      return { sleeper_id: pk, name: displayName(pk), position: displayPos(pk), team: players[pk]?.team ?? null, value, source, slot: slotOf(pk) };
-    }).sort((a, b) => b.value - a.value);
-    const spent = list.filter((p) => p.slot === null).reduce((s, p) => s + p.value, 0);
-    return { owner_name: users[r.owner_id] ?? `roster ${r.roster_id}`, roster_id: r.roster_id, spent, remaining: cap - spent, over_cap: spent > cap, players: list };
-  }).sort((a, b) => b.spent - a.spent);
+  const teams = buildTeams(rosters, {
+    val, src, cap, overridesById, ownerName: users,
+    name: displayName, position: displayPos, team: (pk) => players[pk]?.team ?? null,
+  });
 
   return {
     board: { league_id: cfg.id, league_name: league.name, generated_at: new Date().toISOString(), cap, season, teams },
