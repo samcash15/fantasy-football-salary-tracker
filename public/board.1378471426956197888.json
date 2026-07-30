@@ -1,7 +1,7 @@
 {
   "league_id": "1378471426956197888",
   "league_name": "FUTURE (QA)",
-  "generated_at": "2026-07-29T16:38:49.877Z",
+  "generated_at": "2026-07-30T16:01:08.835Z",
   "cap": 500,
   "season": "2026",
   "teams": [
@@ -196,7 +196,7 @@
           "sleeper_id": "8932",
           "name": "Lucas Havrisik",
           "position": "K",
-          "team": "GB",
+          "team": null,
           "value": 1,
           "source": "auction",
           "slot": null
