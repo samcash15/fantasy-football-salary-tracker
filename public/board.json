@@ -1,7 +1,7 @@
 {
   "league_id": "1378471426956197888",
   "league_name": "FUTURE (QA)",
-  "generated_at": "2026-07-30T16:49:25.916Z",
+  "generated_at": "2026-07-31T16:12:50.705Z",
   "cap": 500,
   "season": "2026",
   "teams": [
@@ -1474,7 +1474,7 @@
           "sleeper_id": "5872",
           "name": "Deebo Samuel",
           "position": "WR",
-          "team": null,
+          "team": "SF",
           "value": 1,
           "source": "auction",
           "slot": null
