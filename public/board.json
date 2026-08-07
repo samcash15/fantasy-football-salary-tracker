@@ -1,7 +1,7 @@
 {
   "league_id": "1378471426956197888",
   "league_name": "FUTURE (QA)",
-  "generated_at": "2026-08-05T16:52:40.630Z",
+  "generated_at": "2026-08-07T15:10:07.831Z",
   "cap": 500,
   "season": "2026",
   "teams": [
@@ -826,7 +826,7 @@
           "sleeper_id": "2449",
           "name": "Stefon Diggs",
           "position": "WR",
-          "team": null,
+          "team": "WAS",
           "value": 1,
           "source": "auction",
           "slot": null
